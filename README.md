@@ -233,6 +233,20 @@ your profile, **Packages**, `family-assistant`, **Package settings**, Change vis
 the folder's ownership on start and runs as `PUID`/`PGID` (default 99:100, Unraid's nobody:users).
 No ports are needed (Telegram long polling).
 
+### Health check
+
+The image has a Docker `HEALTHCHECK`, so the Docker tab shows the container as **healthy** or
+**unhealthy** (it says **starting** for the first minute). Every 60 seconds the bot asks Telegram
+`getMe` and, if that works and no other copy of the bot is polling the same token, refreshes a
+heartbeat file in `/tmp`. The check fails when that file is more than 3 minutes old. Yuvomi and Gmail
+are not part of it, so a Yuvomi outage does not mark the bot unhealthy. To see the detail:
+
+```bash
+docker exec family-assistant python -m family_assistant healthcheck
+```
+
+Docker only reports the status; it does not restart an unhealthy container by itself.
+
 ### Updating
 
 - **Automatic:** run Watchtower limited to labeled containers, the same way as auto-tracker. The
@@ -271,6 +285,8 @@ caps, the Telegram allowlist, the heb.com links and the photo buttons.
 - **"Telegram conflict: another copy of this bot is running"** in the logs: the same bot token is
   polling from two places (for example `python -m family_assistant` still running on your PC). Stop
   the other copy with Ctrl+C; only one copy can receive messages.
+- **Container shows unhealthy:** run the `healthcheck` command above. "another copy" usually means the
+  bot is also running on your PC; otherwise check the logs for Telegram network errors.
 - **"run gmail-auth"** in a scan message: that account's token is missing, expired or revoked.
   Re-run `gmail-auth <label>` and copy the new file to `/config/google/`.
 - **Proposals never arrive for one person:** they have not pressed Start in the bot.

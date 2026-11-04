@@ -139,4 +139,4 @@ def test_scan_jobs_scheduled_at_configured_chicago_times(tmp_path):
     bot, _ = make_bot(tmp_path, {})
     app = bot.build()
     jobs = sorted(j.name for j in app.job_queue.jobs())
-    assert jobs == ["gmail-scan-0700", "gmail-scan-1700"]
+    assert jobs == ["gmail-scan-0700", "gmail-scan-1700", "heartbeat"]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 
 import anthropic
@@ -25,6 +26,7 @@ from .agent import Agent, compose_reply
 from .config import Settings
 from .extract import EventExtractor
 from .gmail import GmailAccount, token_path
+from . import health
 from .photo import IMAGE_TYPES, MAX_IMAGE_BYTES, ItemIdentifier, PhotoError
 from .render import DRY_RUN_PREFIX, render_confirmation
 from .scanner import Decision, ScanReport, Scanner, approve, proposal_text, skip
@@ -123,6 +125,7 @@ class Bot:
                 limit=settings.gmail_max_per_scan,
             )
         self._scan_lock = asyncio.Lock()
+        self.last_conflict: float | None = None
         self.identifier = ItemIdentifier(
             claude, model=settings.claude_model, effort="low", refusal_fallback=settings.claude_refusal_fallback,
         )
@@ -414,10 +417,25 @@ class Bot:
 
     # ------------------------------------------------------------------ errors
 
+    async def heartbeat(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Refresh the health file if Telegram answers and no other copy is polling."""
+        if self.last_conflict is not None and time.monotonic() - self.last_conflict < health.CONFLICT_GRACE:
+            return
+        try:
+            await context.bot.get_me()
+        except TelegramError as exc:
+            log.warning("health check: Telegram did not answer (%s)", exc.__class__.__name__)
+            return
+        try:
+            health.write_heartbeat()
+        except OSError as exc:
+            log.warning("health check: could not write heartbeat file: %s", exc)
+
     async def on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         error = context.error
         if isinstance(error, Conflict):
             # Telegram allows one poller per bot token; the library keeps retrying.
+            self.last_conflict = time.monotonic()
             log.warning(
                 "Telegram conflict: another copy of this bot is running with the same token "
                 "(for example on a PC). Stop the other copy; this one keeps retrying."
@@ -440,6 +458,7 @@ class Bot:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & allowed, self.on_text))
         app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & allowed, self.on_photo))
         app.add_error_handler(self.on_error)
+        app.job_queue.run_repeating(self.heartbeat, interval=health.HEARTBEAT_INTERVAL, first=5, name="heartbeat")
         if self.scanner is not None:
             for t in self.settings.gmail_scan_times:
                 app.job_queue.run_daily(self.scheduled_scan, time=t, name=f"gmail-scan-{t:%H%M}")

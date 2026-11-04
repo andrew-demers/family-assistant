@@ -3,6 +3,7 @@
     python -m family_assistant          run the Telegram bot
     python -m family_assistant check    read-only check of the Yuvomi connection and grocery list name
     python -m family_assistant gmail-auth <label>   one-time Gmail consent (run on a PC with a browser)
+    python -m family_assistant healthcheck   exit 0 if the running bot's heartbeat is fresh (Docker HEALTHCHECK)
 """
 
 from __future__ import annotations
@@ -107,6 +108,12 @@ def _local_config_dir() -> Path:
 
 def main() -> int:
     load_dotenv()
+    if len(sys.argv) > 1 and sys.argv[1] == "healthcheck":
+        from .health import check as health_check
+
+        ok, detail = health_check()
+        print(detail)
+        return 0 if ok else 1
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         return asyncio.run(check())
     if len(sys.argv) > 1 and sys.argv[1] == "gmail-auth":

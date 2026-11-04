@@ -20,4 +20,9 @@ ENV PUID=99 PGID=100
 RUN mkdir -p /config
 VOLUME ["/config"]
 
+# Healthy = the bot reached Telegram in the last 3 minutes and no other copy is polling the same token.
+# Unraid shows this as healthy / unhealthy on the Docker tab.
+HEALTHCHECK --interval=60s --timeout=15s --start-period=60s --retries=3 \
+    CMD ["python", "-m", "family_assistant", "healthcheck"]
+
 ENTRYPOINT ["docker-entrypoint.sh"]
