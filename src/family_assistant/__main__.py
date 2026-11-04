@@ -3,6 +3,8 @@
     python -m family_assistant          run the Telegram bot
     python -m family_assistant check    read-only check of the Yuvomi connection and grocery list name
     python -m family_assistant gmail-auth <label>   one-time Gmail consent (run on a PC with a browser)
+    python -m family_assistant heb-stores "<address>"   find your HEB store ID
+    python -m family_assistant heb-login [--browser]  save HEB credentials / log in
 """
 
 from __future__ import annotations
@@ -89,7 +91,7 @@ def gmail_auth(label: str) -> int:
     if not client_id or not client_secret:
         print("Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env first.")
         return 2
-    config_dir = Path(os.environ.get("CONFIG_DIR", "").strip() or "config")
+    config_dir = _local_config_dir()
     print(f"Opening a browser. Sign in with the Gmail account for '{label}' and allow read-only access.")
     try:
         path = authorize_account(config_dir, label.lower(), client_id, client_secret)
@@ -100,8 +102,104 @@ def gmail_auth(label: str) -> int:
     return 0
 
 
+def _local_config_dir() -> Path:
+    return Path(os.environ.get("CONFIG_DIR", "").strip() or "config")
+
+
+def _heb_command() -> str:
+    return os.environ.get("HEB_MCP_COMMAND", "").strip() or "texas-grocery-mcp"
+
+
+async def heb_stores(address: str) -> int:
+    from .heb import HebError, HebMcp
+
+    try:
+        async with HebMcp(_heb_command(), _local_config_dir()) as heb:
+            result = await heb.call("store_search", {"address": address})
+    except HebError as exc:
+        print(f"PROBLEM: {exc}")
+        return 1
+    stores = result.get("stores") or []
+    if not stores:
+        print(f"The HEB tool found no stores near {address!r}.")
+        if result.get("error"):
+            print(f"It said: {result['error']}")
+        failed = [a for a in result.get("attempts") or [] if a.get("result") == "error"]
+        if failed:
+            print(f"{len(failed)} lookup(s) to HEB failed, so this is likely the tool, not your address.")
+            print("Find your store's numeric ID on heb.com instead (see README, HEB section).")
+        return 1
+    for s in stores:
+        online = "curbside" if s.get("supports_curbside") else "in-store only"
+        miles = f"{s['distance_miles']} mi, " if s.get("distance_miles") is not None else ""
+        print(f"  {s.get('store_id'):>6}  {s.get('name')} - {s.get('address')} ({miles}{online})")
+    print("Put the ID of your curbside store in HEB_DEFAULT_STORE.")
+    return 0
+
+
+async def heb_login(use_browser: bool) -> int:
+    """Save HEB credentials (container) or log in with a visible browser (PC)."""
+    import getpass
+
+    from .heb import HebError, HebMcp
+
+    config_dir = _local_config_dir()
+    try:
+        async with HebMcp(_heb_command(), config_dir) as heb:
+            if not use_browser:
+                print("Your HEB email and password are stored encrypted in the heb folder of CONFIG_DIR.")
+                email = input("HEB email: ").strip()
+                password = getpass.getpass("HEB password (not shown): ")
+                saved = await heb.call("session_save_credentials", {"email": email, "password": password})
+                del password
+                if not saved.get("success"):
+                    print(f"PROBLEM: {saved.get('error') or 'could not save credentials'}")
+                    return 1
+                print(saved.get("message", "Credentials saved."))
+            args = {"headless": False, "use_saved_credentials": False} if use_browser else \
+                   {"headless": True, "use_saved_credentials": True}
+            for _ in range(10):
+                result = await heb.call("session_refresh", args)
+                status = result.get("status")
+                if status == "success":
+                    break
+                if status == "human_action_required":
+                    action = result.get("action") or "login"
+                    if not use_browser:
+                        print(f"HEB wants a person to complete '{action}', which cannot be seen from here.")
+                        print("Run `python -m family_assistant heb-login --browser` on a PC instead (see README).")
+                        return 1
+                    answer = input(f"Complete the {action} in the browser window, then press Enter (q to quit): ")
+                    if answer.strip().lower() == "q":
+                        return 1
+                    continue
+                print(f"PROBLEM: login failed ({result.get('error_type') or result.get('error') or 'no details'}).")
+                return 1
+            else:
+                print("PROBLEM: gave up after 10 attempts.")
+                return 1
+            auth = await heb.call("cart_check_auth")
+    except HebError as exc:
+        print(f"PROBLEM: {exc}")
+        return 1
+    if not auth.get("authenticated"):
+        print("PROBLEM: HEB still reports you as logged out.")
+        return 1
+    print(f"OK: logged in to HEB. Session saved under {config_dir / 'heb'}.")
+    if use_browser:
+        print("Copy auth.json from that folder to the container's /config/heb/.")
+    return 0
+
+
 def main() -> int:
     load_dotenv()
+    if len(sys.argv) > 1 and sys.argv[1] == "heb-stores":
+        if len(sys.argv) < 3:
+            print('Usage: python -m family_assistant heb-stores "<address or ZIP>"')
+            return 2
+        return asyncio.run(heb_stores(" ".join(sys.argv[2:])))
+    if len(sys.argv) > 1 and sys.argv[1] == "heb-login":
+        return asyncio.run(heb_login(use_browser="--browser" in sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         return asyncio.run(check())
     if len(sys.argv) > 1 and sys.argv[1] == "gmail-auth":

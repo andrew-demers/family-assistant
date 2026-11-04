@@ -29,6 +29,7 @@ How to act:
 - Each request becomes separate tool calls: one call per grocery item, one per task, one per event.
   "Add X to my grocery list and my to do list" means two calls: add_grocery_item and add_todo.
 - "Grocery list", "shopping list" -> add_grocery_item. "To do list", "todo", "reminder to do X" -> add_todo.
+- "Order the groceries", "put the groceries in my HEB cart" -> order_groceries (once). It never pays.
 - For events: resolve relative dates ("Friday", "tomorrow at 3") against the current date and time given
   in the message. If the date or start time is missing or ambiguous, do not call the tool. Ask ONE short
   clarifying question instead. An event the user explicitly calls all-day needs no time.
@@ -172,7 +173,7 @@ class Agent:
                 result.model_text = model_text
 
         result.actions = list(actions.log)
-        result.reply = compose_reply(result.actions, result.model_text, notes, actions.dry_run)
+        result.reply = compose_reply(result.actions, result.model_text, notes, actions.dry_run, actions.reports)
         log.info(
             "agent done stop=%s iterations=%d tokens=%d actions=%s",
             result.stop, result.iterations, result.tokens, [(a.kind, a.status) for a in result.actions],
@@ -180,11 +181,14 @@ class Agent:
         return result
 
 
-def compose_reply(actions: list[ActionResult], model_text: str, notes: list[str], dry_run: bool) -> str:
+def compose_reply(
+    actions: list[ActionResult], model_text: str, notes: list[str], dry_run: bool, reports: list[str] = (),
+) -> str:
     parts = []
     confirmation = render_confirmation(actions, dry_run)
     if confirmation:
         parts.append(confirmation)
+    parts.extend(reports)
     if model_text:
         parts.append(model_text.replace(chr(0x2014), "-"))  # no em dashes in user-facing text
     parts.extend(notes)

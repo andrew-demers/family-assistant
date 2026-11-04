@@ -42,6 +42,13 @@ def _int(env: dict[str, str], name: str, default: int) -> int:
         raise ConfigError(f"{name} must be an integer, got {raw!r}") from exc
 
 
+def _heb_store(env: dict[str, str]) -> str:
+    store = env.get("HEB_DEFAULT_STORE", "").strip()
+    if store and not store.isdigit():
+        raise ConfigError("HEB_DEFAULT_STORE must be a numeric HEB store ID (find it with heb-stores)")
+    return store
+
+
 def validate_yuvomi_url(url: str) -> str:
     url = url.strip().rstrip("/")
     if not url.lower().startswith(("http://", "https://")):
@@ -77,6 +84,9 @@ class Settings:
     gmail_query: str = "newer_than:2d -category:promotions -category:social"
     gmail_max_per_scan: int = 25
     gmail_scan_times: tuple[time, ...] = ()
+    # Phase 3: HEB. Empty store disables ordering.
+    heb_store_id: str = ""
+    heb_mcp_command: str = "texas-grocery-mcp"
 
     @property
     def db_path(self) -> Path:
@@ -154,4 +164,6 @@ class Settings:
             gmail_query=env.get("GMAIL_QUERY", "").strip() or "newer_than:2d -category:promotions -category:social",
             gmail_max_per_scan=_int(env, "GMAIL_MAX_PER_SCAN", 25),
             gmail_scan_times=tuple(scan_times),
+            heb_store_id=_heb_store(env),
+            heb_mcp_command=env.get("HEB_MCP_COMMAND", "").strip() or "texas-grocery-mcp",
         )

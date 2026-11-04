@@ -25,6 +25,8 @@ from .agent import Agent, compose_reply
 from .config import Settings
 from .extract import EventExtractor
 from .gmail import GmailAccount, token_path
+from .grocery import Matcher, build_cart, render_order
+from .heb import HebError, HebMcp
 from .render import DRY_RUN_PREFIX, render_confirmation
 from .scanner import Decision, ScanReport, Scanner, approve, proposal_text, skip
 from .store import RateLimiter, Store
@@ -38,6 +40,7 @@ HELP_TEXT = (
     "- Add call the plumber to my to do list\n"
     "- Add an event: dentist Friday at 3pm\n"
     "- What's on the grocery list?\n"
+    "- Order the groceries (builds the HEB cart; you pay in the HEB app)\n"
     "/scan checks email for events now."
 )
 
@@ -80,11 +83,34 @@ class Bot:
                 limit=settings.gmail_max_per_scan,
             )
         self._scan_lock = asyncio.Lock()
+        self.matcher = Matcher(
+            claude, model=settings.claude_model, effort="low", refusal_fallback=settings.claude_refusal_fallback,
+        )
+        self._order_lock = asyncio.Lock()
+        self.heb_factory = lambda: HebMcp(settings.heb_mcp_command, settings.config_dir, settings.heb_store_id)
 
     # ---------------------------------------------------------------- helpers
 
     def new_actions(self) -> Actions:
-        return Actions(self.yuvomi, self.settings.yuvomi_grocery_list, self.settings.dry_run)
+        orderer = self.order_groceries if self.settings.heb_store_id else None
+        return Actions(self.yuvomi, self.settings.yuvomi_grocery_list, self.settings.dry_run, orderer=orderer)
+
+    async def order_groceries(self, actions: Actions) -> str:
+        """Build the HEB cart from the grocery list; returns the summary text."""
+        if self._order_lock.locked():
+            return "An HEB cart is already being built. Try again in a minute."
+        async with self._order_lock:
+            grocery = await actions.read_grocery_list()
+            try:
+                async with self.heb_factory() as heb:
+                    report = await build_cart(
+                        heb, self.matcher, grocery["items"], self.settings.heb_store_id, self.settings.dry_run,
+                    )
+            except HebError as exc:
+                log.warning("HEB order failed: %s", exc)
+                return f"HEB cart not built. The HEB tool had a problem: {exc}. Nothing was added."
+        log.info("HEB order: %s", [(l.requested, l.status) for l in report.lines])
+        return render_order(report)
 
     def name_for(self, user) -> str:
         return self.settings.user_names.get(user.id) or user.first_name or "Someone"

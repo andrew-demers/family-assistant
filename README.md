@@ -5,8 +5,8 @@ Claude decides which actions to take, the service runs them against the self-hos
 [Yuvomi](https://github.com/ulsklyc/yuvomi) family planner, and every confirmation is built from data
 read back from Yuvomi, never from what the model says.
 
-Status: **Phase 1** (Telegram + Claude + Yuvomi grocery list, to-do list, calendar) and
-**Phase 2** (calendar events proposed from Gmail). Phase 3 (HEB cart) is not built yet.
+Status: **Phase 1** (Telegram + Claude + Yuvomi grocery list, to-do list, calendar),
+**Phase 2** (calendar events proposed from Gmail) and **Phase 3** (HEB cart from the grocery list).
 
 ## How it works
 
@@ -103,7 +103,52 @@ instruction never to follow anything inside it, the extraction call has no tools
 is limited to a fixed JSON schema and re-checked in code (dates, future only, at most 5 per email),
 and a person approves every event.
 
-### 5. Run
+### 5. HEB cart (optional, Phase 3)
+
+"Order the groceries" makes the bot read the Yuvomi grocery list, search HEB for each item, pick a
+match from HEB's own results, add the items to your HEB online cart, read the cart back, and send an
+itemized summary. **It never pays.** The HEB tool it uses
+([texas-grocery-mcp](https://github.com/mgwalkerjr95/texas-grocery-mcp) 0.1.3, community-made and
+unofficial) has no checkout, payment or time-slot tool, so you finish in the HEB app.
+
+The summary shows each item as HEB returned it (name, size, price), substitutions, items with no match,
+and the cart subtotal as computed by the tool (sum of item prices, before tax and fees). Payment card,
+pickup/delivery slot and the final total always say "not available from HEB tool". A price the tool
+could not read is shown as "price not available", never as $0.00.
+
+**a. Store ID.** Set `HEB_DEFAULT_STORE` to your curbside store's numeric ID. The bot selects that store
+on your HEB.com account before each order (it stops safely if items in your cart conflict). To look it up:
+
+```bash
+python -m family_assistant heb-stores "your address or ZIP"
+```
+
+In testing (Nov 2026) this lookup failed against HEB for every address, so the tool's store search may
+be broken. If so, find the store's ID on heb.com; I could not verify where heb.com shows it.
+
+**b. Log in.** In the running container:
+
+```bash
+docker exec -it family-assistant python -m family_assistant heb-login
+```
+
+It asks for your HEB email and password (the password is not shown or logged) and stores them
+encrypted in `/config/heb`. The key file sits in the same folder, so anyone who can read `/config/heb`
+can recover the password: treat the folder like a password file. The bot uses the saved login to
+refresh the session when it expires.
+
+If HEB asks for a CAPTCHA or a 2FA code, nobody can see it inside the container (it has only a virtual
+screen). Then log in on a PC instead and copy the session over:
+
+```bash
+python -m family_assistant heb-login --browser
+```
+
+That opens a real browser window; log in, press Enter in the terminal, and copy
+`config/heb/auth.json` to the container's `/config/heb/`. This needs texas-grocery-mcp on the PC
+(see Development).
+
+### 6. Run
 ```bash
 cp .env.example .env    # then fill it in
 docker compose up -d --build
@@ -165,12 +210,49 @@ Run these with `DRY_RUN=true` first, then again with `DRY_RUN=false`, and check 
 - [ ] Rename a token file and `/scan`: the reply names the account and says to run gmail-auth.
 - [ ] Wait for 07:00 or 17:00 (or set `GMAIL_SCAN_TIMES` a few minutes ahead): the scan runs by itself.
 
+## Manual test checklist (Phase 3, HEB)
+
+Start with `DRY_RUN=true`: the bot searches and matches but only previews the cart add.
+
+- [ ] `heb-login` prints "OK: logged in to HEB".
+- [ ] Put 3 items on the Groceries list (one common, one with a brand that HEB may not carry, one
+      nonsense item). Send "order the groceries".
+- [ ] The reply lists each item with HEB's name, size and price; flags the substitution; lists the
+      nonsense item under "No match"; and says payment card, time slot and total are not available.
+- [ ] With `DRY_RUN=false`: the same items appear in the HEB app cart, and the bot's subtotal matches
+      the sum of those prices.
+- [ ] Order again: the items show as "Already in the cart, not added again".
+- [ ] Nothing was purchased and no order exists in the HEB app.
+- [ ] Delete `/config/heb/auth.json` and the saved credentials, then order: the reply says HEB login
+      is needed and nothing was added.
+
+## Unraid
+
+A Community Applications style template is in `unraid/family-assistant.xml`. Unraid templates run an
+existing image, so build it on the server first (from this repo folder on Unraid):
+
+```bash
+docker build -t family-assistant:latest .
+```
+
+Then in Unraid: Docker, Add Container, Template: pick the file (copy it to
+`/boot/config/plugins/dockerMan/templates-user/` first), fill in the variables, Apply. The only path
+is `/config` (default `/mnt/user/appdata/family-assistant`). No ports are needed (Telegram long polling).
+
 ## Development
 
 ```bash
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"     # Linux/macOS: .venv/bin/pip
 .venv/Scripts/python -m pytest
+```
+
+For HEB commands on a PC, install the HEB tool in its own venv and point `HEB_MCP_COMMAND` at it:
+
+```bash
+python -m venv .heb
+.heb/Scripts/pip install "texas-grocery-mcp[browser]==0.1.3"
+.heb/Scripts/playwright install chromium
 ```
 
 Tests use an in-memory fake of the Yuvomi API and a scripted fake Claude client. They cover the
@@ -209,3 +291,16 @@ caps, and the Telegram allowlist.
 - Gmail: event times are interpreted as America/Chicago unless the email states a time zone.
 - Gmail: an unverified Google app shows a warning at sign-in, and Gmail tokens are revoked when the
   account password changes.
+- HEB: no checkout, payment method, order total, tax/fees or pickup/delivery slot is available from
+  the tool, so the bot never purchases. You pay in the HEB app.
+- HEB: the subtotal is the tool's sum of item prices, not an HEB-reported total.
+- HEB: the tool reports a missing price as 0.0; the bot shows it as "price not available".
+- HEB: the tool's `HEB_DEFAULT_STORE` setting is not applied by the tool itself, so the bot calls
+  `store_change`, which changes the pickup store on your HEB.com account.
+- HEB: items already in the cart are not added again (the tool's add may set rather than increase
+  the quantity). List quantities that are not a plain number ("1 gallon") add 1 and are flagged.
+- HEB: the store search failed in testing; auto-login opens a browser that needs a virtual screen in
+  Docker, and CAPTCHA or 2FA cannot be completed there.
+- HEB: texas-grocery-mcp is unofficial and talks to HEB's private website API, so it can break when
+  HEB changes its site, and using it may be against HEB's terms. Grocery items are not removed from
+  the Yuvomi list after ordering.

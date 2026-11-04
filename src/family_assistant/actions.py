@@ -8,6 +8,7 @@ confirmation sent to Telegram never depends on what the model says happened.
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -67,10 +68,22 @@ class Actions:
     grocery_list_name: str
     dry_run: bool
     log: list[ActionResult] = field(default_factory=list)
+    # Phase 3: builds the HEB cart and returns a summary made from HEB tool results.
+    orderer: Callable[[Actions], Awaitable[str]] | None = None
+    reports: list[str] = field(default_factory=list)
 
     def _record(self, result: ActionResult) -> ActionResult:
         self.log.append(result)
         return result
+
+    async def order_groceries(self) -> dict:
+        if self.orderer is None:
+            raise InvalidInput("HEB ordering is not set up (HEB_DEFAULT_STORE is empty)")
+        if self.reports:
+            raise InvalidInput("the HEB cart was already built for this message")
+        summary = await self.orderer(self)
+        self.reports.append(summary)
+        return {"status": "summary sent to the user", "summary": summary}
 
     # ------------------------------------------------------------------ grocery
     async def _grocery_list(self) -> dict:
