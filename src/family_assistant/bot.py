@@ -9,7 +9,7 @@ from datetime import datetime
 import anthropic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest, Conflict, NetworkError, TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -288,6 +288,21 @@ class Bot:
         for chat_id, message_id in self.store.proposal_messages(proposal_id=proposal_id):
             await self._edit(bot, chat_id, message_id, text, markup)
 
+    # ------------------------------------------------------------------ errors
+
+    async def on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        error = context.error
+        if isinstance(error, Conflict):
+            # Telegram allows one poller per bot token; the library keeps retrying.
+            log.warning(
+                "Telegram conflict: another copy of this bot is running with the same token "
+                "(for example on a PC). Stop the other copy; this one keeps retrying."
+            )
+        elif isinstance(error, NetworkError):
+            log.warning("Telegram network error (will retry): %s", error)
+        else:
+            log.error("Unhandled error", exc_info=error)
+
     # ------------------------------------------------------------------ wiring
 
     def build(self) -> Application:
@@ -298,6 +313,7 @@ class Bot:
         app.add_handler(CommandHandler("scan", self.on_scan, filters=allowed))
         app.add_handler(CallbackQueryHandler(self.on_button, pattern=r"^ev:(add|skip|all):\d+$"))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & allowed, self.on_text))
+        app.add_error_handler(self.on_error)
         if self.scanner is not None:
             for t in self.settings.gmail_scan_times:
                 app.job_queue.run_daily(self.scheduled_scan, time=t, name=f"gmail-scan-{t:%H%M}")

@@ -303,6 +303,9 @@ caps, and the Telegram allowlist.
 - **"YUVOMI_URL must start with http://"**: write the full address, e.g. `http://192.168.1.10:3000`.
 - **`failed to connect to the docker API ... docker_engine`** (Windows): Docker Desktop is not running.
   Start it, or run the check with Python as shown above.
+- **"Telegram conflict: another copy of this bot is running"** in the logs: the same bot token is
+  polling from two places (for example `python -m family_assistant` still running on your PC). Stop
+  the other copy with Ctrl+C; only one copy can receive messages.
 - **"run gmail-auth"** in a scan message: that account's token is missing, expired or revoked.
   Re-run `gmail-auth <label>` and copy the new file to `/config/google/`.
 - **Proposals never arrive for one person:** they have not pressed Start in the bot.

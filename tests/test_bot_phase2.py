@@ -124,6 +124,17 @@ async def test_dry_run_prefixes_proposals_and_does_not_write(tmp_path):
     assert all("Would add by Andrew." in e["text"] for e in tg.edits.values())
 
 
+async def test_conflict_is_one_clear_warning_without_traceback(tmp_path, caplog):
+    from telegram.error import Conflict
+
+    bot, _ = make_bot(tmp_path, {})
+    caplog.set_level("WARNING")
+    await bot.on_error(None, SimpleNamespace(error=Conflict("terminated by other getUpdates request")))
+    [record] = caplog.records
+    assert "another copy of this bot is running" in record.getMessage()
+    assert record.exc_info is None
+
+
 def test_scan_jobs_scheduled_at_configured_chicago_times(tmp_path):
     bot, _ = make_bot(tmp_path, {})
     app = bot.build()

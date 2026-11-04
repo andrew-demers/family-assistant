@@ -98,7 +98,8 @@ def gmail_auth(label: str) -> int:
     except ValueError as exc:
         print(f"PROBLEM: {exc}")
         return 2
-    print(f"Saved token to {path}. Copy it to the container's /config/google/ folder.")
+    print(f"Saved token to {path.resolve()}")
+    print("Copy it to the container's /config/google/ folder (on Unraid: appdata/family-assistant/google/).")
     return 0
 
 
