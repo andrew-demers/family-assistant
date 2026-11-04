@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 
 import anthropic
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Update
 from telegram.constants import ChatAction
 from telegram.error import BadRequest, Conflict, NetworkError, TelegramError
 from telegram.ext import (
@@ -25,8 +25,7 @@ from .agent import Agent, compose_reply
 from .config import Settings
 from .extract import EventExtractor
 from .gmail import GmailAccount, token_path
-from .grocery import Matcher, build_cart, render_order
-from .heb import HebError, HebMcp
+from .photo import IMAGE_TYPES, MAX_IMAGE_BYTES, ItemIdentifier, PhotoError
 from .render import DRY_RUN_PREFIX, render_confirmation
 from .scanner import Decision, ScanReport, Scanner, approve, proposal_text, skip
 from .store import RateLimiter, Store
@@ -40,9 +39,50 @@ HELP_TEXT = (
     "- Add call the plumber to my to do list\n"
     "- Add an event: dentist Friday at 3pm\n"
     "- What's on the grocery list?\n"
-    "- Order the groceries (builds the HEB cart; you pay in the HEB app)\n"
+    "- Order the groceries (sends the list as heb.com links)\n"
+    "- Send a photo of an item to add it to the grocery list\n"
     "/scan checks email for events now."
 )
+
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+TELEGRAM_LIMIT = 4000  # Telegram allows 4096 characters per message; leave room.
+
+
+def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        while len(line) > limit:  # a single very long line
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current or not chunks:
+        chunks.append(current)
+    return chunks
+
+
+def photo_prompt(options: tuple[str, ...] | list[str], quantity: str | None, list_name: str) -> str:
+    qty = f" (x{quantity})" if quantity and quantity != "1" else ""
+    text = f"Looks like: {options[0]}{qty}\nAdd it to {list_name}?"
+    if len(options) > 1:
+        text += "\nNot sure? Pick the right one below."
+    return text
+
+
+def photo_buttons(item_id: int, options: tuple[str, ...] | list[str]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(f"Add: {opt}"[:60], callback_data=f"ph:{item_id}:{n}")]
+            for n, opt in enumerate(options)]
+    rows.append([InlineKeyboardButton("Cancel", callback_data=f"ph:{item_id}:x")])
+    return InlineKeyboardMarkup(rows)
+
 
 _FINAL_STATUS_LABEL = {
     "added": "Added", "duplicate": "Already on the calendar", "dry_run": "Would add",
@@ -83,34 +123,14 @@ class Bot:
                 limit=settings.gmail_max_per_scan,
             )
         self._scan_lock = asyncio.Lock()
-        self.matcher = Matcher(
+        self.identifier = ItemIdentifier(
             claude, model=settings.claude_model, effort="low", refusal_fallback=settings.claude_refusal_fallback,
         )
-        self._order_lock = asyncio.Lock()
-        self.heb_factory = lambda: HebMcp(settings.heb_mcp_command, settings.config_dir, settings.heb_store_id)
 
     # ---------------------------------------------------------------- helpers
 
     def new_actions(self) -> Actions:
-        orderer = self.order_groceries if self.settings.heb_store_id else None
-        return Actions(self.yuvomi, self.settings.yuvomi_grocery_list, self.settings.dry_run, orderer=orderer)
-
-    async def order_groceries(self, actions: Actions) -> str:
-        """Build the HEB cart from the grocery list; returns the summary text."""
-        if self._order_lock.locked():
-            return "An HEB cart is already being built. Try again in a minute."
-        async with self._order_lock:
-            grocery = await actions.read_grocery_list()
-            try:
-                async with self.heb_factory() as heb:
-                    report = await build_cart(
-                        heb, self.matcher, grocery["items"], self.settings.heb_store_id, self.settings.dry_run,
-                    )
-            except HebError as exc:
-                log.warning("HEB order failed: %s", exc)
-                return f"HEB cart not built. The HEB tool had a problem: {exc}. Nothing was added."
-        log.info("HEB order: %s", [(l.requested, l.status) for l in report.lines])
-        return render_order(report)
+        return Actions(self.yuvomi, self.settings.yuvomi_grocery_list, self.settings.dry_run)
 
     def name_for(self, user) -> str:
         return self.settings.user_names.get(user.id) or user.first_name or "Someone"
@@ -166,7 +186,111 @@ class Bot:
                 self.settings.dry_run,
             )
         self.store.append_exchange(message.chat_id, message.text, reply)
-        await message.reply_text(reply)
+        await self._reply(message, reply)
+
+    async def _reply(self, message, text: str) -> None:
+        # No link previews (the grocery links would each show a heb.com card), and split long
+        # replies at line breaks to stay under Telegram's message length limit.
+        for chunk in split_message(text):
+            await message.reply_text(chunk, link_preview_options=NO_PREVIEW)
+
+    # ------------------------------------------------------------------ photos
+
+    async def on_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """A photo (or image file) of an item: identify it, then offer buttons to add it."""
+        message = update.effective_message
+        if not self.limiter.allow(update.effective_user.id):
+            await message.reply_text("Slow down a little, please try again in a minute.")
+            return
+        if message.photo:
+            source, media_type, size = message.photo[-1], "image/jpeg", message.photo[-1].file_size
+        else:
+            doc = message.document
+            source, media_type, size = doc, doc.mime_type or "", doc.file_size
+        if media_type not in IMAGE_TYPES:
+            await message.reply_text(self._prefix("I can read JPEG, PNG, GIF or WebP images. Nothing was added."))
+            return
+        if size and size > MAX_IMAGE_BYTES:
+            await message.reply_text(self._prefix("That image is over 5 MB. Try sending it as a photo instead."))
+            return
+
+        await context.bot.send_chat_action(message.chat_id, ChatAction.TYPING)
+        try:
+            file = await source.get_file()
+            image = bytes(await file.download_as_bytearray())
+            result = await self.identifier.identify(image, media_type, message.caption)
+        except (PhotoError, TelegramError, anthropic.APIError) as exc:
+            log.warning("photo identification failed: %s", exc.__class__.__name__)
+            await message.reply_text(self._prefix("Sorry, I could not read that photo. Nothing was added."))
+            return
+
+        caption = f"[photo] {message.caption}" if message.caption else "[photo]"
+        if not result.options:
+            reply = f"{result.reason} Nothing was added. Try a closer photo of the label, or type the item."
+            self.store.append_exchange(message.chat_id, caption, reply)
+            await message.reply_text(self._prefix(reply))
+            return
+
+        item_id = self.store.add_photo_item(message.chat_id, list(result.options), result.quantity)
+        text = photo_prompt(result.options, result.quantity, self.settings.yuvomi_grocery_list)
+        self.store.append_exchange(message.chat_id, caption, text)
+        await message.reply_text(self._prefix(text), reply_markup=photo_buttons(item_id, result.options))
+
+    async def on_photo_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        # CallbackQueryHandler has no user filter, so the allowlist is enforced here.
+        if query.from_user is None or query.from_user.id not in self.settings.allowed_telegram_ids:
+            return
+        try:
+            _, raw_id, choice = (query.data or "").split(":")
+            item_id = int(raw_id)
+        except ValueError:
+            await query.answer()
+            return
+        name = self.name_for(query.from_user)
+        item = self.store.get_photo_item(item_id)
+        if item is None:
+            await query.answer("That item is no longer available.")
+            return
+        if not self.store.claim_photo_item(item_id, name):
+            current = self.store.get_photo_item(item_id) or item
+            await query.answer(f"Already handled by {current.get('handled_by') or 'someone'}.")
+            return
+        await query.answer()
+
+        if choice == "x":
+            self.store.set_photo_status(item_id, "cancelled")
+            await self._edit_query(query, f"Cancelled by {name}. Nothing was added.")
+            return
+        try:
+            chosen = item["options"][int(choice)]
+        except (ValueError, IndexError):
+            self.store.set_photo_status(item_id, "pending")
+            return
+
+        try:
+            result = await self.new_actions().add_grocery_item(chosen, item["quantity"])
+        except Exception:
+            log.exception("photo item add failed")
+            self.store.set_photo_status(item_id, "pending")
+            await self._edit_query(query, "Something went wrong on my side. Nothing was confirmed as added.",
+                                   photo_buttons(item_id, item["options"]))
+            return
+        confirmation = render_confirmation([result], self.settings.dry_run)
+        if result.status == "failed":
+            # Nothing was confirmed as written, and the duplicate check stops a double add, so
+            # the buttons stay for another try.
+            self.store.set_photo_status(item_id, "pending")
+            await self._edit_query(query, confirmation, photo_buttons(item_id, item["options"]))
+            return
+        self.store.set_photo_status(item_id, "done")
+        await self._edit_query(query, f"{confirmation}\n\nChosen by {name}.")
+
+    async def _edit_query(self, query, text: str, markup=None) -> None:
+        message = query.message
+        if message is None:
+            return
+        await self._edit(query.get_bot(), message.chat.id, message.message_id, text, markup)
 
     # -------------------------------------------------------------- Gmail scan
 
@@ -312,7 +436,9 @@ class Bot:
         app.add_handler(CommandHandler(["start", "help"], self.on_help, filters=allowed))
         app.add_handler(CommandHandler("scan", self.on_scan, filters=allowed))
         app.add_handler(CallbackQueryHandler(self.on_button, pattern=r"^ev:(add|skip|all):\d+$"))
+        app.add_handler(CallbackQueryHandler(self.on_photo_button, pattern=r"^ph:\d+:(\d|x)$"))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & allowed, self.on_text))
+        app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & allowed, self.on_photo))
         app.add_error_handler(self.on_error)
         if self.scanner is not None:
             for t in self.settings.gmail_scan_times:

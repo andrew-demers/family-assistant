@@ -14,7 +14,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     # No ports: Telegram is reached by long polling (outbound only).
     volumes:
-      # SQLite state, Gmail tokens (google/) and the HEB session (heb/).
+      # SQLite state and Gmail tokens (google/).
       - ${CONFIG_PATH:-/mnt/user/appdata/family-assistant}:/config
     environment:
       CONFIG_DIR: /config
@@ -52,5 +52,3 @@ services:
       GMAIL_QUERY: ${GMAIL_QUERY:-newer_than:2d -category:promotions -category:social}
       GMAIL_MAX_PER_SCAN: ${GMAIL_MAX_PER_SCAN:-25}
 
-      # HEB (optional; empty HEB_DEFAULT_STORE turns ordering off)
-      HEB_DEFAULT_STORE: ${HEB_DEFAULT_STORE:-}

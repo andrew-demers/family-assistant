@@ -13,8 +13,4 @@ if [ "$(id -u)" = "0" ]; then
     exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups "$0" "$@"
 fi
 
-# Virtual display for the HEB login browser (texas-grocery-mcp opens a headed browser).
-if [ -n "$DISPLAY" ] && command -v Xvfb >/dev/null 2>&1; then
-    Xvfb "$DISPLAY" -screen 0 1280x900x24 -nolisten tcp >/dev/null 2>&1 &
-fi
 exec python -m family_assistant "$@"

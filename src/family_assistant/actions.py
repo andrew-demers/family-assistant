@@ -8,10 +8,10 @@ confirmation sent to Telegram never depends on what the model says happened.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .shopping_links import render_shopping_links
 from .yuvomi import YuvomiClient, YuvomiError
 
 Kind = Literal["grocery", "task", "event"]
@@ -68,22 +68,20 @@ class Actions:
     grocery_list_name: str
     dry_run: bool
     log: list[ActionResult] = field(default_factory=list)
-    # Phase 3: builds the HEB cart and returns a summary made from HEB tool results.
-    orderer: Callable[[Actions], Awaitable[str]] | None = None
+    # Text the app sends as-is (built from read data, never from the model).
     reports: list[str] = field(default_factory=list)
 
     def _record(self, result: ActionResult) -> ActionResult:
         self.log.append(result)
         return result
 
-    async def order_groceries(self) -> dict:
-        if self.orderer is None:
-            raise InvalidInput("HEB ordering is not set up (HEB_DEFAULT_STORE is empty)")
+    async def shopping_links(self) -> dict:
+        """Read the grocery list and send it as heb.com search links. Read-only."""
         if self.reports:
-            raise InvalidInput("the HEB cart was already built for this message")
-        summary = await self.orderer(self)
-        self.reports.append(summary)
-        return {"status": "summary sent to the user", "summary": summary}
+            raise InvalidInput("the shopping links were already sent for this message")
+        grocery = await self.read_grocery_list()
+        self.reports.append(render_shopping_links(grocery["list"], grocery["items"]))
+        return {"status": "list with heb.com links sent to the user", "items": len(grocery["items"])}
 
     # ------------------------------------------------------------------ grocery
     async def _grocery_list(self) -> dict:

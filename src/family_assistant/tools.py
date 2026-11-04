@@ -70,9 +70,9 @@ TOOLS: list[dict] = [
     {
         "name": "order_groceries",
         "description": (
-            "Build the H-E-B online cart from the whole grocery list (search, match, add to cart). "
-            "Use when the user asks to order or buy the groceries. It never purchases or pays; the "
-            "app sends the itemized cart summary itself. Call at most once per message."
+            "Send the whole grocery list as heb.com search links so the user can add each item to "
+            "their H-E-B cart by hand. Use when the user asks to order, buy or shop for the groceries. "
+            "It does not touch H-E-B; the app sends the list itself. Call at most once per message."
         ),
         "strict": True,
         "input_schema": _schema({}),
@@ -100,7 +100,7 @@ TOOLS: list[dict] = [
     },
 ]
 
-WRITE_TOOLS = {"add_grocery_item", "add_todo", "create_calendar_event", "order_groceries"}
+WRITE_TOOLS = {"add_grocery_item", "add_todo", "create_calendar_event"}
 
 
 async def run_tool(actions: Actions, name: str, args: dict) -> tuple[str, bool]:
@@ -118,7 +118,7 @@ async def run_tool(actions: Actions, name: str, args: dict) -> tuple[str, bool]:
                 args.get("location"), args.get("description"),
             )).for_model()
         elif name == "order_groceries":
-            result = await actions.order_groceries()
+            result = await actions.shopping_links()
         elif name == "get_grocery_list":
             result = await actions.read_grocery_list()
         elif name == "get_todo_list":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from collections import defaultdict, deque
@@ -61,6 +62,15 @@ class Store:
                 message_id INTEGER NOT NULL,
                 proposal_id INTEGER,
                 batch_id INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS photo_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                options TEXT NOT NULL,
+                quantity TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                handled_by TEXT,
+                created_at REAL NOT NULL
             );
             """
         )
@@ -186,6 +196,44 @@ class Store:
                 "SELECT chat_id, message_id FROM proposal_messages WHERE batch_id = ?", (batch_id,),
             )
         return [tuple(r) for r in rows.fetchall()]
+
+    # ------------------------------------------------------------ photo items
+
+    def add_photo_item(self, chat_id: int, options: list[str], quantity: str | None) -> int:
+        cur = self._db.execute(
+            "INSERT INTO photo_items (chat_id, options, quantity, created_at) VALUES (?, ?, ?, ?)",
+            (chat_id, json.dumps(options), quantity, time.time()),
+        )
+        self._db.commit()
+        return cur.lastrowid
+
+    def get_photo_item(self, item_id: int) -> dict | None:
+        row = self._db.execute(
+            "SELECT id, chat_id, options, quantity, status, handled_by FROM photo_items WHERE id = ?", (item_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        keys = ("id", "chat_id", "options", "quantity", "status", "handled_by")
+        item = dict(zip(keys, row))
+        item["options"] = json.loads(item["options"])
+        return item
+
+    def claim_photo_item(self, item_id: int, handler: str) -> bool:
+        """Atomically take a pending photo item. Only the first tap gets True."""
+        cur = self._db.execute(
+            "UPDATE photo_items SET status = 'working', handled_by = ? WHERE id = ? AND status = 'pending'",
+            (handler, item_id),
+        )
+        self._db.commit()
+        return cur.rowcount == 1
+
+    def set_photo_status(self, item_id: int, status: str) -> None:
+        """status 'pending' also clears handled_by, so the buttons work again."""
+        if status == "pending":
+            self._db.execute("UPDATE photo_items SET status = 'pending', handled_by = NULL WHERE id = ?", (item_id,))
+        else:
+            self._db.execute("UPDATE photo_items SET status = ? WHERE id = ?", (status, item_id))
+        self._db.commit()
 
 
 class RateLimiter:

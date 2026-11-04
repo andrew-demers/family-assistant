@@ -6,10 +6,10 @@
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Overview>Household assistant: a private Telegram bot that uses Claude to manage the Yuvomi grocery list, to-do list and calendar, proposes events found in Gmail, and builds the HEB cart. The image is built by GitHub Actions on every push to main (see README). Docker Compose is the recommended install.</Overview>
+  <Overview>Household assistant: a private Telegram bot that uses Claude to manage the Yuvomi grocery list, to-do list and calendar, proposes events found in Gmail, sends the grocery list as heb.com links, and adds items from photos. The image is built by GitHub Actions on every push to main (see README). Docker Compose is the recommended install.</Overview>
   <Category>Productivity:</Category>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
-  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/family-assistant" Mode="rw" Description="State: SQLite, Gmail tokens (google/), HEB session (heb/). Keep private." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/family-assistant</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/family-assistant" Mode="rw" Description="State: SQLite and Gmail tokens (google/). Keep private." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/family-assistant</Config>
   <Config Name="TELEGRAM_BOT_TOKEN" Target="TELEGRAM_BOT_TOKEN" Default="" Description="From @BotFather." Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="ALLOWED_TELEGRAM_IDS" Target="ALLOWED_TELEGRAM_IDS" Default="" Description="Comma-separated numeric Telegram user IDs." Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="TELEGRAM_USER_NAMES" Target="TELEGRAM_USER_NAMES" Default="" Description="Display names, same order as the IDs." Type="Variable" Display="always" Required="false" Mask="false"/>
@@ -27,7 +27,6 @@
   <Config Name="GMAIL_QUERY" Target="GMAIL_QUERY" Default="newer_than:2d -category:promotions -category:social" Description="Gmail search for emails to read." Type="Variable" Display="advanced" Required="false" Mask="false">newer_than:2d -category:promotions -category:social</Config>
   <Config Name="GOOGLE_OAUTH_CLIENT_ID" Target="GOOGLE_OAUTH_CLIENT_ID" Default="" Description="Only needed where gmail-auth runs; tokens carry it." Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="GOOGLE_OAUTH_CLIENT_SECRET" Target="GOOGLE_OAUTH_CLIENT_SECRET" Default="" Description="Only needed where gmail-auth runs." Type="Variable" Display="advanced" Required="false" Mask="true"/>
-  <Config Name="HEB_DEFAULT_STORE" Target="HEB_DEFAULT_STORE" Default="" Description="Numeric HEB curbside store ID. Empty turns HEB ordering off." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="TZ" Target="TZ" Default="America/Chicago" Description="Time zone." Type="Variable" Display="advanced" Required="true" Mask="false">America/Chicago</Config>
   <Config Name="RATE_LIMIT_PER_MINUTE" Target="RATE_LIMIT_PER_MINUTE" Default="10" Description="Messages per user per minute." Type="Variable" Display="advanced" Required="false" Mask="false">10</Config>
   <Config Name="MAX_TOOL_ITERATIONS" Target="MAX_TOOL_ITERATIONS" Default="6" Description="Agent loop cap per message." Type="Variable" Display="advanced" Required="false" Mask="false">6</Config>
