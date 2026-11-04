@@ -1,0 +1,9 @@
+services:
+  family-assistant:
+    build: .
+    image: family-assistant:latest
+    container_name: family-assistant
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./config:/config
