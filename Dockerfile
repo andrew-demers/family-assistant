@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# bookworm: a Debian release Playwright's `install --with-deps` supports.
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,6 +19,7 @@ RUN apt-get update \
  && /opt/heb/bin/pip install "texas-grocery-mcp[browser]==0.1.3" \
  && /opt/heb/bin/playwright install --with-deps chromium \
  && chmod -R a+rX /opt/ms-playwright \
+ && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -27,9 +29,10 @@ RUN pip install .
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
-# Unraid convention: nobody:users (99:100) owns appdata.
-RUN mkdir -p /config && chown 99:100 /config
-USER 99:100
+# The entrypoint starts as root, fixes /config ownership, then drops to PUID:PGID
+# (default 99:100, Unraid's nobody:users).
+ENV PUID=99 PGID=100
+RUN mkdir -p /config
 VOLUME ["/config"]
 
 ENTRYPOINT ["docker-entrypoint.sh"]

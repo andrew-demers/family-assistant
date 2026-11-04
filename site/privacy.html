@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy - Family Assistant</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 680px; margin: 0 auto;
+           padding: 32px 16px; line-height: 1.6; color: #1f2328; background: #fff; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.2rem; margin-top: 2rem; }
+    .sub { color: #59636e; margin-top: 0; }
+    a { color: #0969da; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="sub">Family Assistant. Effective November 3, 2026.</p>
+
+  <h2>Who uses this app</h2>
+  <p>Family Assistant is a private app used only by the two members of one household. It runs on our
+  own home server. It is not available to anyone else.</p>
+
+  <h2>What Google data it accesses</h2>
+  <p>With each user's consent, the app uses the Gmail read-only permission
+  (<code>gmail.readonly</code>) to read recent emails in that user's own inbox. It cannot send, delete,
+  change or label email.</p>
+
+  <h2>How the data is used</h2>
+  <ul>
+    <li>The app looks at recent emails (by default from the last two days, excluding promotions and social
+    categories) to find ones that describe a dated event, such as an appointment, reservation or school
+    event.</li>
+    <li>To do this, the text, subject, sender and date of each such email are sent to the Anthropic Claude
+    API, which returns any events the email describes (title, date, time, location). Anthropic processes
+    this data to provide its service under its own terms and privacy policy.</li>
+    <li>Each found event is sent to the two household members in a private Telegram chat, showing the event
+    details plus the email's subject and sender, so one of us can choose to add it to our family calendar
+    or skip it.</li>
+  </ul>
+
+  <h2>What is stored</h2>
+  <ul>
+    <li>On our home server: the IDs of emails already checked (so they are not read twice), and for each
+    proposed event its details plus the email's subject and sender. Full email bodies are not stored.</li>
+    <li>On our home server: the Google access token for each account, kept private.</li>
+    <li>In our self-hosted family calendar: events we choose to add, with a note naming the email's subject
+    and sender.</li>
+  </ul>
+
+  <h2>Sharing</h2>
+  <p>Google user data is not sold, not used for advertising, and not shared with anyone except as needed
+  to provide the features above (the Claude API for finding events, and Telegram for showing them to us).
+  No humans other than the two household members read the emails.</p>
+  <p>Family Assistant's use and transfer of information received from Google APIs adheres to the
+  <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data
+  Policy</a>, including the Limited Use requirements.</p>
+
+  <h2>Removing access</h2>
+  <p>Either user can revoke the app's access at any time at
+  <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. Stored data can
+  be deleted from the home server on request.</p>
+
+  <h2>Contact</h2>
+  <p>Andrew Demers, <a href="mailto:andrew.demers91@gmail.com">andrew.demers91@gmail.com</a></p>
+
+  <p><a href="index.html">Back to home</a></p>
+</body>
+</html>

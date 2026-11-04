@@ -1,12 +1,12 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>family-assistant</Name>
-  <Repository>family-assistant:latest</Repository>
+  <Repository>ghcr.io/andrew-demers/family-assistant:latest</Repository>
   <Registry/>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Overview>Household assistant: a private Telegram bot that uses Claude to manage the Yuvomi grocery list, to-do list and calendar, proposes events found in Gmail, and builds the HEB cart. Build the image first: docker build -t family-assistant:latest . (see README).</Overview>
+  <Overview>Household assistant: a private Telegram bot that uses Claude to manage the Yuvomi grocery list, to-do list and calendar, proposes events found in Gmail, and builds the HEB cart. The image is built by GitHub Actions on every push to main (see README). Docker Compose is the recommended install.</Overview>
   <Category>Productivity:</Category>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/family-assistant" Mode="rw" Description="State: SQLite, Gmail tokens (google/), HEB session (heb/). Keep private." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/family-assistant</Config>

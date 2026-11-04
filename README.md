@@ -38,7 +38,7 @@ the read-back fails, the reply says which step failed and what was and was not d
    verify it:
 
 ```bash
-docker compose run --rm family-assistant check
+docker exec -it -u 99:100 family-assistant python -m family_assistant check
 ```
 
 Without Docker (for example on your PC, after `pip install -e .` in a venv), the same check reads `.env`
@@ -129,8 +129,10 @@ be broken. If so, find the store's ID on heb.com; I could not verify where heb.c
 **b. Log in.** In the running container:
 
 ```bash
-docker exec -it family-assistant python -m family_assistant heb-login
+docker exec -it -u 99:100 family-assistant python -m family_assistant heb-login
 ```
+
+(`-u 99:100` runs it as the same user as the app, so the saved files are readable by the bot.)
 
 It asks for your HEB email and password (the password is not shown or logged) and stores them
 encrypted in `/config/heb`. The key file sits in the same folder, so anyone who can read `/config/heb`
@@ -149,13 +151,16 @@ That opens a real browser window; log in, press Enter in the terminal, and copy
 (see Development).
 
 ### 6. Run
+
+On Unraid, use Docker Compose (see [Unraid](#unraid) below). Anywhere else with Docker:
+
 ```bash
 cp .env.example .env    # then fill it in
-docker compose up -d --build
+CONFIG_PATH=./config docker compose up -d
 docker compose logs -f
 ```
 
-State (conversation history for follow-up questions) is kept in SQLite under `/config`.
+State (conversation history, Gmail tokens, HEB session) lives in `/config`.
 
 ## DRY_RUN
 
@@ -228,16 +233,46 @@ Start with `DRY_RUN=true`: the bot searches and matches but only previews the ca
 
 ## Unraid
 
-A Community Applications style template is in `unraid/family-assistant.xml`. Unraid templates run an
-existing image, so build it on the server first (from this repo folder on Unraid):
+### How images get built
 
-```bash
-docker build -t family-assistant:latest .
-```
+Every push to `main` on GitHub runs `.github/workflows/docker-publish.yml`: it runs the tests, and only
+if they pass builds the image and publishes it as `ghcr.io/andrew-demers/family-assistant:latest`
+(plus a tag with the short commit SHA). Watch it under the repo's **Actions** tab; a run takes a few
+minutes (Chromium makes the image large). You can also start it by hand there with **Run workflow**.
 
-Then in Unraid: Docker, Add Container, Template: pick the file (copy it to
-`/boot/config/plugins/dockerMan/templates-user/` first), fill in the variables, Apply. The only path
-is `/config` (default `/mnt/user/appdata/family-assistant`). No ports are needed (Telegram long polling).
+The first time, check that the package is public so Unraid can pull it without logging in: on GitHub,
+your profile, **Packages**, `family-assistant`, **Package settings**, Change visibility to **Public**.
+(The image contains only the code that is already public in this repo; no secrets.)
+
+### Install with Docker Compose (Compose Manager)
+
+1. Install the **Docker Compose Manager** plugin from Community Applications (if you have not already).
+2. Docker tab, bottom of the page: **Add New Stack**, name it `family-assistant`.
+3. Click the stack's gear icon, **Edit Stack**, **Compose File**: paste the contents of
+   `docker-compose.yml` from this repo. Save.
+4. **Edit Stack**, **Env File**: paste your `.env` (the same values as on your PC, but without
+   `CONFIG_DIR`, which the compose file sets). Save.
+5. Copy the Gmail tokens: put the `google` folder from your PC's `config/` into
+   `/mnt/user/appdata/family-assistant/` (for example via the `appdata` share).
+6. **Compose Up**. Check the logs from the container's icon on the Docker tab.
+
+`CONFIG_PATH` (default `/mnt/user/appdata/family-assistant`) is where state is kept. The container fixes
+the folder's ownership on start and runs as `PUID`/`PGID` (default 99:100, Unraid's nobody:users).
+No ports are needed (Telegram long polling).
+
+### Updating
+
+- **Automatic:** run Watchtower limited to labeled containers, the same way as auto-tracker. The
+  compose file already carries `com.centurylinklabs.watchtower.enable=true`, so a Watchtower started
+  with `WATCHTOWER_LABEL_ENABLE=true` pulls each new image and restarts this container.
+- **Manual:** in Compose Manager, **Compose Pull** then **Compose Up** (the compose file uses
+  `pull_policy: always`, so **Compose Up** alone also fetches the newest image).
+
+### Template instead of Compose
+
+`unraid/family-assistant.xml` is a Community Applications style template that runs the same image:
+copy it to `/boot/config/plugins/dockerMan/templates-user/`, then Docker, Add Container, Template, fill
+in the variables, Apply.
 
 ## Development
 

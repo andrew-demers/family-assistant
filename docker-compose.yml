@@ -1,12 +1,56 @@
 services:
   family-assistant:
-    build: .
-    image: family-assistant:latest
+    # Pulls the image built by .github/workflows/docker-publish.yml on every
+    # push to main. To build locally from source instead, comment out `image:`
+    # and uncomment `build: .`.
+    image: ghcr.io/andrew-demers/family-assistant:latest
+    # build: .
+    pull_policy: always
     container_name: family-assistant
     restart: unless-stopped
-    env_file: .env
-    environment:
-      # Overrides CONFIG_DIR from .env, which may point at ./config for local runs.
-      CONFIG_DIR: /config
+    # Opt this container into Watchtower's updates without Watchtower touching
+    # every other container on the box - see README's Watchtower setup.
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    # No ports: Telegram is reached by long polling (outbound only).
     volumes:
-      - ./config:/config
+      # SQLite state, Gmail tokens (google/) and the HEB session (heb/).
+      - ${CONFIG_PATH:-/mnt/user/appdata/family-assistant}:/config
+    environment:
+      CONFIG_DIR: /config
+      TZ: ${TZ:-America/Chicago}
+      # Unraid's default "nobody:users" - override to match your host if needed.
+      PUID: ${PUID:-99}
+      PGID: ${PGID:-100}
+      DRY_RUN: ${DRY_RUN:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # Telegram
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required - get one from @BotFather}
+      ALLOWED_TELEGRAM_IDS: ${ALLOWED_TELEGRAM_IDS:?ALLOWED_TELEGRAM_IDS is required - numeric IDs from @userinfobot}
+      TELEGRAM_USER_NAMES: ${TELEGRAM_USER_NAMES:-}
+
+      # Claude
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5-5}
+      CLAUDE_EFFORT: ${CLAUDE_EFFORT:-medium}
+      CLAUDE_REFUSAL_FALLBACK: ${CLAUDE_REFUSAL_FALLBACK:-true}
+      MAX_TOOL_ITERATIONS: ${MAX_TOOL_ITERATIONS:-6}
+      MAX_TOKENS_PER_MESSAGE: ${MAX_TOKENS_PER_MESSAGE:-60000}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-10}
+
+      # Yuvomi
+      YUVOMI_URL: ${YUVOMI_URL:?YUVOMI_URL is required, e.g. http://192.168.1.10:3000}
+      YUVOMI_API_TOKEN: ${YUVOMI_API_TOKEN:?YUVOMI_API_TOKEN is required}
+      YUVOMI_GROCERY_LIST: ${YUVOMI_GROCERY_LIST:-Shopping}
+
+      # Gmail (optional; empty GMAIL_ACCOUNTS turns the email scan off)
+      GMAIL_ACCOUNTS: ${GMAIL_ACCOUNTS:-}
+      GMAIL_ACCOUNT_NAMES: ${GMAIL_ACCOUNT_NAMES:-}
+      GMAIL_EVENT_MODE: ${GMAIL_EVENT_MODE:-propose}
+      GMAIL_SCAN_TIMES: ${GMAIL_SCAN_TIMES:-07:00,17:00}
+      GMAIL_QUERY: ${GMAIL_QUERY:-newer_than:2d -category:promotions -category:social}
+      GMAIL_MAX_PER_SCAN: ${GMAIL_MAX_PER_SCAN:-25}
+
+      # HEB (optional; empty HEB_DEFAULT_STORE turns ordering off)
+      HEB_DEFAULT_STORE: ${HEB_DEFAULT_STORE:-}
