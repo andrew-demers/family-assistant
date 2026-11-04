@@ -2,6 +2,7 @@
 
     python -m family_assistant          run the Telegram bot
     python -m family_assistant check    read-only check of the Yuvomi connection and grocery list name
+    python -m family_assistant gmail-auth <label>   one-time Gmail consent (run on a PC with a browser)
 """
 
 from __future__ import annotations
@@ -79,10 +80,35 @@ async def check() -> int:
     return 0 if ok else 1
 
 
+def gmail_auth(label: str) -> int:
+    """One-time Google consent for one Gmail account, in a local browser."""
+    from .gmail import authorize_account
+
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        print("Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env first.")
+        return 2
+    config_dir = Path(os.environ.get("CONFIG_DIR", "").strip() or "config")
+    print(f"Opening a browser. Sign in with the Gmail account for '{label}' and allow read-only access.")
+    try:
+        path = authorize_account(config_dir, label.lower(), client_id, client_secret)
+    except ValueError as exc:
+        print(f"PROBLEM: {exc}")
+        return 2
+    print(f"Saved token to {path}. Copy it to the container's /config/google/ folder.")
+    return 0
+
+
 def main() -> int:
     load_dotenv()
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         return asyncio.run(check())
+    if len(sys.argv) > 1 and sys.argv[1] == "gmail-auth":
+        if len(sys.argv) != 3:
+            print("Usage: python -m family_assistant gmail-auth <account-label>   (e.g. andrew)")
+            return 2
+        return gmail_auth(sys.argv[2])
     try:
         settings = Settings.from_env()
     except ConfigError as exc:

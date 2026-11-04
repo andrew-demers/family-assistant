@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+from datetime import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -68,6 +70,13 @@ class Settings:
     dry_run: bool
     config_dir: Path
     log_level: str
+    # Phase 2: Gmail. Empty gmail_accounts disables the scan.
+    gmail_accounts: tuple[str, ...] = ()
+    gmail_account_names: dict[str, str] = field(default_factory=dict)
+    gmail_event_mode: str = "propose"
+    gmail_query: str = "newer_than:2d -category:promotions -category:social"
+    gmail_max_per_scan: int = 25
+    gmail_scan_times: tuple[time, ...] = ()
 
     @property
     def db_path(self) -> Path:
@@ -98,6 +107,28 @@ class Settings:
             raise ConfigError("CLAUDE_EFFORT must be low, medium or high")
 
         tz_name = env.get("TZ", "America/Chicago").strip() or "America/Chicago"
+        tz = ZoneInfo(tz_name)
+
+        accounts = tuple(a.strip().lower() for a in env.get("GMAIL_ACCOUNTS", "").split(",") if a.strip())
+        for label in accounts:
+            if not re.fullmatch(r"[a-z0-9_-]{1,32}", label):
+                raise ConfigError(f"GMAIL_ACCOUNTS label {label!r}: use lowercase letters, digits, - or _")
+        account_names = {
+            label: name.strip()
+            for label, name in zip(accounts, env.get("GMAIL_ACCOUNT_NAMES", "").split(","))
+            if name.strip()
+        }
+        mode = env.get("GMAIL_EVENT_MODE", "propose").strip().lower() or "propose"
+        if mode not in {"propose", "auto"}:
+            raise ConfigError("GMAIL_EVENT_MODE must be propose or auto")
+        scan_times = []
+        for raw in (env.get("GMAIL_SCAN_TIMES", "07:00,17:00").split(",")):
+            raw = raw.strip()
+            if not raw:
+                continue
+            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", raw):
+                raise ConfigError(f"GMAIL_SCAN_TIMES entry {raw!r} must be HH:MM")
+            scan_times.append(time(int(raw[:2]), int(raw[3:]), tzinfo=tz))
 
         return cls(
             telegram_bot_token=_required(env, "TELEGRAM_BOT_TOKEN"),
@@ -113,8 +144,14 @@ class Settings:
             yuvomi_url=validate_yuvomi_url(_required(env, "YUVOMI_URL")),
             yuvomi_api_token=_required(env, "YUVOMI_API_TOKEN"),
             yuvomi_grocery_list=env.get("YUVOMI_GROCERY_LIST", "Shopping").strip() or "Shopping",
-            tz=ZoneInfo(tz_name),
+            tz=tz,
             dry_run=_bool(env, "DRY_RUN", True),
             config_dir=Path(env.get("CONFIG_DIR", "/config")),
             log_level=env.get("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+            gmail_accounts=accounts,
+            gmail_account_names=account_names,
+            gmail_event_mode=mode,
+            gmail_query=env.get("GMAIL_QUERY", "").strip() or "newer_than:2d -category:promotions -category:social",
+            gmail_max_per_scan=_int(env, "GMAIL_MAX_PER_SCAN", 25),
+            gmail_scan_times=tuple(scan_times),
         )

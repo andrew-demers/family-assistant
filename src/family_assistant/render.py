@@ -34,6 +34,10 @@ def _fmt_end(start: str | None, end: str | None, all_day: bool) -> str:
     return f" - {end_fmt}"
 
 
+def format_when(start: str | None, end: str | None, all_day: bool) -> str:
+    return _fmt_datetime(start, all_day) + _fmt_end(start, end, all_day) + (" (all day)" if all_day else "")
+
+
 def describe(result: ActionResult) -> str:
     """One item as Yuvomi returned it."""
     rec = result.record or {}
@@ -51,8 +55,7 @@ def describe(result: ActionResult) -> str:
     all_day = bool(rec.get("all_day"))
     start = rec.get("start_datetime")
     where = f" at {rec['location']}" if rec.get("location") else ""
-    span = _fmt_datetime(start, all_day) + _fmt_end(start, rec.get("end_datetime"), all_day)
-    return f"{rec.get('title', result.requested)}, {span}{' (all day)' if all_day else ''}{where}{id_part}"
+    return f"{rec.get('title', result.requested)}, {format_when(start, rec.get('end_datetime'), all_day)}{where}{id_part}"
 
 
 def _group(results: list[ActionResult]) -> dict[str, list[ActionResult]]:

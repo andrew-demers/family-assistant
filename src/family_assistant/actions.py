@@ -207,6 +207,14 @@ class Actions:
             for e in events
         ]}
 
+    async def find_duplicate_event(self, title: str, start: str) -> dict | None:
+        """An existing event with the same title and start (minute, or date for all-day)."""
+        day = start[:10]
+        for existing in await self.yuvomi.list_events(day, day):
+            if normalize(existing.get("title")) == normalize(title) and _same_start(existing.get("start_datetime"), start):
+                return existing
+        return None
+
     async def create_event(
         self,
         title: str,
@@ -232,10 +240,8 @@ class Actions:
 
         step = "duplicate check"
         try:
-            day = start[:10]
-            for existing in await self.yuvomi.list_events(day, day):
-                if normalize(existing.get("title")) == normalize(title) and _same_start(existing.get("start_datetime"), start):
-                    return self._record(ActionResult("event", "duplicate", title, CALENDAR_LABEL, record=existing))
+            if existing := await self.find_duplicate_event(title, start):
+                return self._record(ActionResult("event", "duplicate", title, CALENDAR_LABEL, record=existing))
 
             if self.dry_run:
                 preview = {"title": title, "start_datetime": start, "end_datetime": end, "all_day": int(all_day), "location": location}
